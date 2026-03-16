@@ -41,3 +41,5 @@ ENV TOTAL_WORKERS=10
 # Run the command
 CMD ["python", "parallel_worker.py"]
 
+# Verify build:
+# docker build --provenance=false --platform linux/amd64 -t verify-build .
