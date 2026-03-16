@@ -5,7 +5,7 @@ contains
 
     ! Calculates a 2D locus of the Schrodinger Wave Equation 
     ! The main subroutine exposed to Python via f2py
-    subroutine compute_wave_matrix(size_n, matrix, num_steps, h_bar, mass)
+    subroutine compute_wave_matrix(matrix, size_n, num_steps, h_bar, mass)
         implicit none
         
         ! Scalar Inputs from Python (intent(in))

@@ -1,0 +1,3 @@
+import schrodinger_mod
+print(dir(schrodinger_mod.schrodinger_mod))
+help(schrodinger_mod.schrodinger_mod.compute_wave_matrix)
