@@ -30,11 +30,31 @@ have each worker compute the entire grid at different time steps
     For the memory layout to match what Fortran expects, set the ``order="F"`` flag when initializing the input matrix.
 
 # GitLab CI/CD
+For the variables:
+Project > Settings > CI/CD > Project Variables > CI/CD Variables > Add variable
+
 To run .gitlab-ci.yml, psh the branch to the GitLab project. It will detect the file and automatically trigger the pipeline. 
+- .gitlab-ci.yml should be under root directory. 
 '''
 git add .gitlab-ci.yml
-git commit -m "Add CI pipeline"
+git commit -m "Add CI pipeline (and blah blah)"
 git push origin main
 '''
+GitLab Validation
+- Project > Build > Pipelines on the left sidebar.
+- Click the Status icon (Running/Passed) of the latest commit.
+- Click the build_image job to see the logs.
+- Verify you see "Build Complete!" at the end.
 
-Go to Project > CI/CD > Pipelines to watch the job run.
+
+
+Local check:
+``aws configure``
+(grab access keys: https://dovzji14roepy.cloudfront.net/ > Login to Account > Access keys)
+
+'''
+aws ecr get-login-password --region us-west-2 \
+| docker login \
+--username AWS \
+--password-stdin 123456789012.dkr.ecr.us-west-2.amazonaws.com
+'''
