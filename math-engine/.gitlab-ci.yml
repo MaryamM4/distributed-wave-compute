@@ -1,0 +1,62 @@
+stages:
+- build
+- test
+- deploy
+
+# Build Docker image
+build_image:
+  stage: build
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+  script:
+    - echo "Building Docker Image..."
+    - docker build --provenance=false --platform linux/amd64 -t $ECR_REPOSITORY:$CI_COMMIT_SHORT_SHA ./eks-cluster/math-engine
+    - echo "Build completed."
+
+# Test build
+test_build:
+  stage: test
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+  script:
+    - echo "Testing Docker build..."
+    - docker build --provenance=false --platform linux/amd64 -t verify-build ./eks-cluster/math-engine
+    - echo "Test successful."
+  needs: ["build_image"]
+
+# Push image to AWS ECR
+deploy_ecr:
+  stage: deploy
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+  before_script:
+    - apk add --no-cache python3 py3-pip
+    - pip install awscli
+  script:
+    - echo "Starting Deployment to ECR..."
+
+    # Needs to build again for the image to also exist in this job
+    - docker build --provenance=false --platform linux/amd64 -t $ECR_REPOSITORY:$CI_COMMIT_SHORT_SHA ./eks-cluster/math-engine
+
+    - echo "Authenticating with AWS..."
+    - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+
+    # Rename local Docker image to match AWS ECR repository path 
+    # (Docker pushes require images to be named according to the remote registry)
+    - echo "Tagging image for ECR..."
+    - docker tag $ECR_REPOSITORY:$CI_COMMIT_SHORT_SHA $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPOSITORY:$CI_COMMIT_SHORT_SHA
+
+    - echo "Pushing image to ECR..."
+    - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPOSITORY:$CI_COMMIT_SHORT_SHA
+
+    - echo "Deployment Successfully Completed."
+  needs: ["test_build"]
+
+
