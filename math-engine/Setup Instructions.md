@@ -28,3 +28,13 @@ have each worker compute the entire grid at different time steps
     Make your life easy and use keyword arguments. Ex: ``(matrix=matrix, size_n=grid_size, num_steps=job_index, h_bar=H_BAR, mass=MASS)``. 
 - Fortran stores arrays in column-major order, while NumPy by default creates arrays in row-major order (C order).
     For the memory layout to match what Fortran expects, set the ``order="F"`` flag when initializing the input matrix.
+
+# GitLab CI/CD
+To run .gitlab-ci.yml, psh the branch to the GitLab project. It will detect the file and automatically trigger the pipeline. 
+'''
+git add .gitlab-ci.yml
+git commit -m "Add CI pipeline"
+git push origin main
+'''
+
+Go to Project > CI/CD > Pipelines to watch the job run.
