@@ -30,8 +30,17 @@ have each worker compute the entire grid at different time steps
     For the memory layout to match what Fortran expects, set the ``order="F"`` flag when initializing the input matrix.
 
 # GitLab CI/CD
-For the variables:
+For the **variables**:
 Project > Settings > CI/CD > Project Variables > CI/CD Variables > Add variable
+Variables such as: AWS_ACCESS_KEY_ID, AWS_DEFAULT_REGION, AWS_SECRET_ACCESS_KEY
+See: 
+- https://docs.gitlab.com/ci/cloud_deployment/ 
+- https://docs.aws.amazon.com/AmazonECR/latest/userguide/docker-push-ecr-image.html 
+
+User will require **permissions** for pushing & pulling images. 
+Go to IAM > Users > Select user > Add permissions > Attatch policy.
+(Easiest policy is AmazonEC2ContainerRegistryPowerUser).
+
 
 To run .gitlab-ci.yml, psh the branch to the GitLab project. It will detect the file and automatically trigger the pipeline. 
 - .gitlab-ci.yml should be under root directory. 
