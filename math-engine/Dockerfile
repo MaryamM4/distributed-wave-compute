@@ -1,11 +1,12 @@
 
 # STAGE 1: BUILD FORTRAN MODULE
-# Use slim python image
-FROM python:3.11-slim AS builder
+FROM python:3.12 AS builder
 
 # Install build tools
 RUN apt-get update && apt-get install -y \
-        gfortran build-essential python3-venv wget \
+        meson ninja-build gfortran \ 
+        python3-numpy python3-dev \
+        build-essential python3-dev wget \
         && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
@@ -15,15 +16,17 @@ WORKDIR /build
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy application code
+# Copy application source code
 COPY schrodinger.f90 .
 COPY parallel_worker.py .
 
-# Compile Fortran module via f2py
-RUN python -m numpy.f2py -c -m schrodinger_mod schrodinger.f90 --fcompiler=gnu95
+# Compile Fortran module via standalone f2py script (avoid python wrapper)
+RUN f2py -c -m schrodinger_mod schrodinger.f90 --fcompiler=gnu95
 
-# STAGE 2: RUNTIME CONTAINER (small)
-FROM python:3.11-slim
+#============================
+# STAGE 2: RUNTIME CONTAINER 
+FROM python:3.12-slim
+
 WORKDIR /app
 
 # Install Python runtime dependencies
