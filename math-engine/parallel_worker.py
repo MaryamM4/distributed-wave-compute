@@ -128,14 +128,9 @@ def main():
     # Determine current worker's reponsiblity
     start_row, end_row = get_partition_edges(job_idx, total_jobs, grid_size)
     print(f"Job {job_idx} working on rows {start_row}-{end_row-1}.")
-    chunk = matrix[start_row:end_row, :].astype(np.complex128)
 
-    # "Extended" chunk accomodates neighbors (edges need to see neighbors for laplacian)
-    extended = chunk
-    if top_neighbor is not None:
-        extended = np.vstack([top_neighbor, extended])
-    if bottom_neighbor is not None:
-        extended = np.vstack([extended, bottom_neighbor])
+    chunk = matrix[start_row:end_row, :].astype(np.complex128)
+    extended = chunk # "Extended" will accomodate neighbors 
 
     for step in range(total_steps): # "Animation" loop
         # Boundary exchange 
@@ -143,6 +138,7 @@ def main():
         time.sleep(0.001) # To avoid Redis thrashing & provide sync delay before neighbors write
         top_neighbor, bottom_neighbor = pull_neighbor_edges(r, job_idx, total_jobs)
 
+        # Edges need to see neighbors for laplacian
         extended[1:-1, :] = chunk    # Fill center (chunk)
         if top_neighbor is not None: # Fill ghost rows (neighbors)
             extended = np.vstack([top_neighbor, extended])
