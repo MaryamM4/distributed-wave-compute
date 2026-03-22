@@ -76,7 +76,8 @@ deploy_k8s:
       #- aws eks get-token --region $AWS_DEFAULT_REGION --cluster-name schrodinger-cluster > /dev/null
 
       # Install kubectl
-      - curl -o kubectl https://s3.us-west-2.amazonaws.com/amazon-eks/1.34.0/2024-01-04/bin/linux/amd64/kubectl
+      - KUBECTL_VERSION=$(curl -L -s https://dl.k8s.io/release/stable.txt)
+      - curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
       - chmod +x kubectl
       - mv kubectl /usr/local/bin/
 
@@ -84,14 +85,19 @@ deploy_k8s:
       - aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name schrodinger-cluster
 
   script:
+    # debug helpers:
+    - kubectl version --client
+    - echo "REDIS_HOST=$REDIS_HOST"
+    - test -n "$REDIS_HOST"
+
     - echo "(k8 Job) Testing AWS CLI..."
     - aws sts get-caller-identity
 
-    # Debug helper: If this fails, authentication problem. Othewise, job YAML. 
+    # Debug: If get nodes fails, authentication problem, othewise, job YAML. 
     - kubectl get nodes
 
     # Jobs are immutable in Kubernetes, so delete old one. Safe if job DNE
-    - kubectl delete job schrodinger-job -n schrodinger || true  
+    - kubectl delete job schrodinger-job -n schrodinger --wait=true || true
 
     - echo "Setting env vars and creating Job..."
     - >
