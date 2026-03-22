@@ -75,6 +75,9 @@ deploy_k8s:
       # Force AWS IAM plugin to run once before kubectl tries to use it
       #- aws eks get-token --region $AWS_DEFAULT_REGION --cluster-name schrodinger-cluster > /dev/null
 
+      # Install envsubst
+      - yum install -y gettext
+
       # Install kubectl
       - KUBECTL_VERSION=$(curl -L -s https://dl.k8s.io/release/stable.txt)
       - curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
