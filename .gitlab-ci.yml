@@ -70,6 +70,9 @@ deploy_k8s:
       - mkdir -p ~/.kube
       - echo "$KUBECONFIG_CONTENT" | base64 -d > ~/.kube/config
 
+      # Prevent kubectl from using default kubecofig baked into image
+      - export KUBECONFIG=$HOME/.kube/config 
+
       # Install AWS CLI v2
       - apt-get update && apt-get install -y curl unzip
       - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
