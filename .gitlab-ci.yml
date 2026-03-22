@@ -60,6 +60,7 @@ deploy_ecr:
   needs: ["test_build"]
 
 # Deploy to Kubernetes
+# TODO: Consider CronJobs
 deploy_k8s:
   stage: deploy
   image: google/cloud-sdk:latest
@@ -88,13 +89,18 @@ deploy_k8s:
     - echo "(k8 Job) Testing AWS CLI..."
     - aws sts get-caller-identity
 
+    # Jobs are immutable in Kubernetes, so delete old one first. Still safe if job DNE
+    - kubectl delete job schrodinger-job -n schrodinger || true  
+
+    # Re/create job
+    - kubectl apply -f schrodinger-job.yaml
+
     - echo "Setting Redis env vars..."
     - kubectl set env job/schrodinger-job REDIS_HOST=$REDIS_HOST REDIS_PORT=6379 -n schrodinger
 
     - echo "Updating image..."
     - kubectl set image job/schrodinger-job worker=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPOSITORY:$CI_COMMIT_SHORT_SHA -n schrodinger
 
-    - echo "Restarting pods..."
-    - kubectl delete pod -l job-name=schrodinger-job -n schrodinger || true
     - echo "Deployment (Kubernetes) Successfully Completed."
+
   needs: ["deploy_ecr"]
