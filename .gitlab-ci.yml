@@ -64,8 +64,16 @@ deploy_k8s:
   stage: deploy
   image: google/cloud-sdk:latest
   before_script:
-    - mkdir -p ~/.kube
-    - echo "$KUBECONFIG_CONTENT" | base64 -d > ~/.kube/config
+      # Create k8 config directory, reconstruct kubeconfig file inside CI container. kubectl then knows
+      #  which EKS cluster to talk to, cluster endpoint, certificate authority, & authentication method.
+      - mkdir -p ~/.kube
+      - echo "$KUBECONFIG_CONTENT" | base64 -d > ~/.kube/config
+
+      # Install AWS CLI v2
+      - apt-get update && apt-get install -y curl unzip
+      - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+      - unzip awscliv2.zip
+      - ./aws/install
   script:
     - echo "Setting Redis env vars..."
     - kubectl set env job/schrodinger-job REDIS_HOST=$REDIS_HOST REDIS_PORT=6379 -n schrodinger
