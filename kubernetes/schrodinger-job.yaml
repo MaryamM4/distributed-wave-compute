@@ -19,7 +19,7 @@ spec:
 
       containers:
       - name: worker  # image: ECR image URI. 
-        image: schrodinger-worker:stable # GitLab CI will override this placeholder.
+        image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${ECR_REPOSITORY}:${CI_COMMIT_SHORT_SHA}
         imagePullPolicy: Always
 
         env:
@@ -36,7 +36,7 @@ spec:
           value: "10000"
 
         - name: REDIS_HOST  # value: Redis EC2 public IP
-          value: "placeholder" # GitLab CI will override 
+          value: "${REDIS_HOST}"
         - name: REDIS_PORT
           value: "6379"
 

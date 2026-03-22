@@ -63,22 +63,17 @@ deploy_ecr:
 # TODO: Consider CronJobs
 deploy_k8s:
   stage: deploy
-  image: google/cloud-sdk:latest
+  image: amazon/aws-cli:2.15.0
   before_script:
-      # Install AWS CLI v2
-      - apt-get update && apt-get install -y curl unzip
-      - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-      - unzip awscliv2.zip
-      - ./aws/install
       - aws --version
-
-      # Export AWS credentials for kubectl exec auth
-      - export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
-      - export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
-      - export AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION
 
       # Force AWS IAM plugin to run once before kubectl tries to use it
       #- aws eks get-token --region $AWS_DEFAULT_REGION --cluster-name schrodinger-cluster > /dev/null
+
+      # Install kubectl
+      - curl -o kubectl https://s3.us-west-2.amazonaws.com/amazon-eks/1.34.0/2024-01-04/bin/linux/amd64/kubectl
+      - chmod +x kubectl
+      - mv kubectl /usr/local/bin/
 
       # Generate kubeconfig dynamically in the CI 
       - aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name schrodinger-cluster
@@ -93,14 +88,8 @@ deploy_k8s:
     # Jobs are immutable in Kubernetes, so delete old one. Safe if job DNE
     - kubectl delete job schrodinger-job -n schrodinger || true  
 
-    # Re/create job
-    - kubectl apply -f kubernetes/schrodinger-job.yaml
-
-    - echo "Setting Redis env vars..."
-    - kubectl set env job/schrodinger-job REDIS_HOST=$REDIS_HOST REDIS_PORT=6379 -n schrodinger
-
-    - echo "Updating image..."
-    - kubectl set image job/schrodinger-job worker=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPOSITORY:$CI_COMMIT_SHORT_SHA -n schrodinger
+    - echo "Setting env vars and creating Job..."
+    - envsubst '$AWS_ACCOUNT_ID $AWS_DEFAULT_REGION $ECR_REPOSITORY $CI_COMMIT_SHORT_SHA $REDIS_HOST' < kubernetes/schrodinger-job.yaml | kubectl apply -f -
 
     - echo "Deployment (Kubernetes) Successfully Completed."
 
