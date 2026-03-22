@@ -41,7 +41,7 @@ def poll_redis_raw(r, key, sleep_interval=0.05, timeout=None, fail_quetly=False,
 def get_initial_state(r, job_idx, grid_size):
     if job_idx == 0:  # (First job only) calls Fortran module to compute initial state
         matrix = np.zeros((grid_size, grid_size), dtype=np.float64, order="F")
-        schrodinger_mod.schrodinger_mod.compute_wave_matrix(matrix=matrix, grid_size=grid_size, num_steps=NUM_STEPS, h_bar=H_BAR, mass=MASS) 
+        schrodinger_mod.schrodinger_mod.compute_wave_matrix(matrix=matrix, size_n=grid_size, num_steps=NUM_STEPS, h_bar=H_BAR, mass=MASS) 
 
         # Publish initial grid for other workers to use
         r.set("initial_matrix", matrix.tobytes()) 
