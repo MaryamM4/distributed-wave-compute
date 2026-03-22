@@ -62,7 +62,7 @@ deploy_ecr:
 # Deploy to Kubernetes
 deploy_k8s:
   stage: deploy
-  image: lachlanevenson/k8s-kubectl:latest
+  image: google/cloud-sdk:latest
   before_script:
     - mkdir -p ~/.kube
     - echo "$KUBECONFIG_CONTENT" | base64 -d > ~/.kube/config
