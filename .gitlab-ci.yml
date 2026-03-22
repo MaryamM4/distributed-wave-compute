@@ -56,13 +56,13 @@ deploy_ecr:
     - echo "Pushing image to ECR..."
     - docker push $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPOSITORY:$CI_COMMIT_SHORT_SHA
 
-    - echo "Deployment Successfully Completed."
+    - echo "Deployment (ECR) Successfully Completed."
   needs: ["test_build"]
 
 # Deploy to Kubernetes
 deploy_k8s:
   stage: deploy
-  image: bitnami/kubectl:latest
+  image: lachlanevenson/k8s-kubectl:latest
   before_script:
     - mkdir -p ~/.kube
     - echo "$KUBECONFIG_CONTENT" | base64 -d > ~/.kube/config
@@ -75,4 +75,5 @@ deploy_k8s:
 
     - echo "Restarting pods..."
     - kubectl delete pod -l job-name=schrodinger-job -n schrodinger || true
+    - echo "Deployment (Kubernetes) Successfully Completed."
   needs: ["deploy_ecr"]
