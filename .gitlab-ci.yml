@@ -89,11 +89,11 @@ deploy_k8s:
     - echo "(k8 Job) Testing AWS CLI..."
     - aws sts get-caller-identity
 
-    # Jobs are immutable in Kubernetes, so delete old one first. Still safe if job DNE
+    # Jobs are immutable in Kubernetes, so delete old one. Safe if job DNE
     - kubectl delete job schrodinger-job -n schrodinger || true  
 
     # Re/create job
-    - kubectl apply -f schrodinger-job.yaml
+    - kubectl apply -f kubernetes/schrodinger-job.yaml
 
     - echo "Setting Redis env vars..."
     - kubectl set env job/schrodinger-job REDIS_HOST=$REDIS_HOST REDIS_PORT=6379 -n schrodinger

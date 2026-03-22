@@ -1,0 +1,56 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "EC2 instance with Redis installed"
+
+Resources:
+
+  RedisSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: "Allow Redis and SSH"
+      VpcId: "vpc-0392a6d6e88431833" # eksctl-schrodinger-cluster-cluster/VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 6379
+          ToPort: 6379
+          CidrIp: 0.0.0.0/0  # Redis exposed to entire internet for demo. TODO: restrict.
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+
+  RedisInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t2.micro
+
+      ImageId: "{{resolve:ssm:/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2}}"
+
+      KeyName: schrodinger-key-pair
+
+      NetworkInterfaces:
+        - AssociatePublicIpAddress: true   # Enables public IP
+          DeviceIndex: "0"
+          SubnetId: "subnet-0bd3ba33e092e29e8"  # us-west-2b
+          GroupSet:
+            - Ref: RedisSecurityGroup
+
+      UserData:
+        Fn::Base64: |
+          #!/bin/bash
+          yum update -y
+          amazon-linux-extras install redis6 -y
+
+          # Allow external connections
+          sed -i 's/^bind .*/bind 0.0.0.0/' /etc/redis.conf
+          sed -i 's/^protected-mode yes/protected-mode no/' /etc/redis.conf
+
+          systemctl enable redis
+          systemctl start redis
+
+Outputs:
+  InstancePublicIP:
+    Description: "Public IP of the Redis EC2 instance"
+    Value:
+      Fn::GetAtt:
+        - RedisInstance
+        - PublicIp
