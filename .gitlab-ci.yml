@@ -104,9 +104,8 @@ deploy_k8s:
 
     - echo "Setting env vars and creating Job..."
     - >
-      envsubst '${AWS_ACCOUNT_ID} ${AWS_DEFAULT_REGION} ${ECR_REPOSITORY} ${CI_COMMIT_SHORT_SHA} ${REDIS_HOST}' \
-      < kubernetes/schrodinger-job.yaml | kubectl apply -f -
-
+      envsubst '${AWS_ACCOUNT_ID} ${AWS_DEFAULT_REGION} ${ECR_REPOSITORY} ${CI_COMMIT_SHORT_SHA} ${REDIS_HOST}' < kubernetes/schrodinger-job.yaml | kubectl apply -f -
+    
     - echo "Deployment (Kubernetes) Successfully Completed."
 
   needs: ["deploy_ecr"]
