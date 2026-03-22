@@ -65,14 +65,6 @@ deploy_k8s:
   stage: deploy
   image: google/cloud-sdk:latest
   before_script:
-      # Create k8 config directory, reconstruct kubeconfig file inside CI container. kubectl then knows
-      #  which EKS cluster to talk to, cluster endpoint, certificate authority, & authentication method.
-      - mkdir -p ~/.kube
-      - echo "$KUBECONFIG_CONTENT" | base64 -d > ~/.kube/config
-
-      # Prevent kubectl from using default kubecofig baked into image
-      - export KUBECONFIG=$HOME/.kube/config 
-
       # Install AWS CLI v2
       - apt-get update && apt-get install -y curl unzip
       - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
@@ -86,11 +78,17 @@ deploy_k8s:
       - export AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION
 
       # Force AWS IAM plugin to run once before kubectl tries to use it
-      - aws eks get-token --region $AWS_DEFAULT_REGION --cluster-name schrodinger-cluster > /dev/null
+      #- aws eks get-token --region $AWS_DEFAULT_REGION --cluster-name schrodinger-cluster > /dev/null
+
+      # Generate kubeconfig dynamically in the CI 
+      - aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name schrodinger-cluster
 
   script:
     - echo "(k8 Job) Testing AWS CLI..."
     - aws sts get-caller-identity
+
+    # Debug helper: If this fails, authentication problem. Othewise, job YAML. 
+    - kubectl get nodes
 
     # Jobs are immutable in Kubernetes, so delete old one. Safe if job DNE
     - kubectl delete job schrodinger-job -n schrodinger || true  
