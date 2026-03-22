@@ -74,7 +74,20 @@ deploy_k8s:
       - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
       - unzip awscliv2.zip
       - ./aws/install
+      - aws --version
+
+      # Export AWS credentials for kubectl exec auth
+      - export AWS_ACCESS_KEY_ID=$AWS_ACCESS_KEY_ID
+      - export AWS_SECRET_ACCESS_KEY=$AWS_SECRET_ACCESS_KEY
+      - export AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION
+
+      # Force AWS IAM plugin to run once before kubectl tries to use it
+      - aws eks get-token --region $AWS_DEFAULT_REGION --cluster-name schrodinger-cluster > /dev/null
+
   script:
+    - echo "(k8 Job) Testing AWS CLI..."
+    - aws sts get-caller-identity
+
     - echo "Setting Redis env vars..."
     - kubectl set env job/schrodinger-job REDIS_HOST=$REDIS_HOST REDIS_PORT=6379 -n schrodinger
 
