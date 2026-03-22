@@ -67,7 +67,12 @@ deploy_k8s:
     - mkdir -p ~/.kube
     - echo "$KUBECONFIG_CONTENT" | base64 -d > ~/.kube/config
   script:
-    - kubectl set env job/schrodinger-job TOTAL_STEPS=$TOTAL_STEPS GRID_SIZE=$GRID_SIZE REDIS_HOST=$REDIS_HOST REDIS_PORT=6379 -n schrodinger
+    - echo "Setting Redis env vars..."
+    - kubectl set env job/schrodinger-job REDIS_HOST=$REDIS_HOST REDIS_PORT=6379 -n schrodinger
+
+    - echo "Updating image..."
     - kubectl set image job/schrodinger-job worker=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPOSITORY:$CI_COMMIT_SHORT_SHA -n schrodinger
+
+    - echo "Restarting pods..."
     - kubectl delete pod -l job-name=schrodinger-job -n schrodinger || true
   needs: ["deploy_ecr"]
