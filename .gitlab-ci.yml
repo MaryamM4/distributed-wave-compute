@@ -59,4 +59,15 @@ deploy_ecr:
     - echo "Deployment Successfully Completed."
   needs: ["test_build"]
 
-
+# Deploy to Kubernetes
+deploy_k8s:
+  stage: deploy
+  image: bitnami/kubectl:latest
+  before_script:
+    - mkdir -p ~/.kube
+    - echo "$KUBECONFIG_CONTENT" | base64 -d > ~/.kube/config
+  script:
+    - kubectl set env job/schrodinger-job TOTAL_STEPS=$TOTAL_STEPS GRID_SIZE=$GRID_SIZE REDIS_HOST=$REDIS_HOST REDIS_PORT=6379 -n schrodinger
+    - kubectl set image job/schrodinger-job worker=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPOSITORY:$CI_COMMIT_SHORT_SHA -n schrodinger
+    - kubectl delete pod -l job-name=schrodinger-job -n schrodinger || true
+  needs: ["deploy_ecr"]
