@@ -37,14 +37,14 @@ def poll_redis_raw(r, key, sleep_interval=0.05, timeout=None, fail_quetly=False,
 # @NOTE: Alternative options to sharing via Redis:
 # B. Compute initial matrix before launching workers, save to object storage (con: shared filesystem or S3 setup, so no).
 # C. Modify the Fortran function to only compute chunk. Favoring this option but am avoiding Fortran edits rn.
+# D. MPI instead of Redis (goes against instructions).
 def get_initial_state(r, job_idx, grid_size):
     if job_idx == 0:  # (First job only) calls Fortran module to compute initial state
         matrix = np.zeros((grid_size, grid_size), dtype=np.float64, order="F")
         schrodinger_mod.schrodinger_mod.compute_wave_matrix(matrix=matrix, size_n=grid_size, num_steps=NUM_STEPS, h_bar=H_BAR, mass=MASS) 
 
-        # Publish initial grid for other workers to use
-        r.set("initial_matrix", matrix.tobytes()) 
-
+        r.set("initial_matrix", matrix.tobytes()) # Publish initial grid for other workers to use
+        
     else:
         raw = poll_redis_raw(r, "initial_matrix")
         matrix = np.frombuffer(raw, dtype=np.float64).copy().reshape((grid_size, grid_size))
@@ -73,12 +73,12 @@ def pull_neighbor_edges(r, job_idx, total_jobs, step):
 
     if job_idx > 0: 
         key = f"worker:{job_idx-1}:bottom:{step}"
-        raw = poll_redis_raw(r, key, timeout=None) # block until read
+        raw = poll_redis_raw(r, key, timeout=None) 
         top_neighbor = deserialize_row(raw)
 
     if job_idx < total_jobs - 1:
         key = f"worker:{job_idx+1}:top:{step}"
-        raw = poll_redis_raw(r, key, timeout=None) # block until read 
+        raw = poll_redis_raw(r, key, timeout=None) 
         bottom_neighbor = deserialize_row(raw)
     
     return top_neighbor, bottom_neighbor
@@ -128,13 +128,14 @@ def main():
     # Setup redis connection
     r = redis.Redis(host=redis_host, port=redis_port)
 
-    # Prepare/get first frame (worker 0 uses Fortran module to compute it)
-    matrix = get_initial_state(r, job_idx, grid_size) # Will block until it's avilable
-
     # Determine current worker's reponsiblity
     start_row, end_row = get_partition_edges(job_idx, total_jobs, grid_size)
+    print(f"JOB {job_idx} START (rows {start_row}-{end_row-1})")
+
+    # Prepare/get first frame (worker 0 uses Fortran module to compute it)
+    matrix = get_initial_state(r, job_idx, grid_size) # Will block until it's avilable
     chunk = matrix[start_row:end_row, :].astype(np.complex128)
-    print(f"Job {job_idx} working on rows {start_row}-{end_row-1}.")
+    print(f"Job {job_idx} published/recieved initial matrix.")
 
     for step in range(total_steps): # "Animation" loop
         ready_key = f"ready:{step}"
@@ -178,7 +179,7 @@ def main():
 
             print(f"Worker {job_idx} Published step {step}")
 
-    print(f"Worker {job_idx} completed rows {start_row}-{end_row-1}.")
+    print(f"JOB {job_idx} FINISH (rows {start_row}-{end_row-1})")
 
 if __name__ == "__main__":
     main()

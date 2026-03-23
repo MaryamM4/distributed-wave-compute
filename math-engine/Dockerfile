@@ -32,9 +32,10 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install runtime libs required by Fortran
+# Install runtime libs required by Fortran and redis-cli
 RUN apt-get update && apt-get install -y \
     libgfortran5 \
+    redis-tools \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies
