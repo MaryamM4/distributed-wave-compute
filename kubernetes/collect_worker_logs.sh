@@ -9,8 +9,6 @@ NAMESPACE="schrodinger"
 mkdir -p "$local_dir"
 
 for ((i=0; i<$N_WORKERS; i++)); do
-    echo "---- Worker $i ----"
-
     # Find the pod for this worker index
     pod=$(kubectl get pod -n $NAMESPACE \
         -l batch.kubernetes.io/job-completion-index=$i \
@@ -21,7 +19,7 @@ for ((i=0; i<$N_WORKERS; i++)); do
         continue
     fi
 
-    echo "Pod: $pod"
+    echo "Worker $i pod: $pod"
 
     # File logs (logger) and stdout logs (Kubernetes view)
     kubectl cp "$NAMESPACE/$pod:$REMOTE_DIR/worker_${i}.log" "$local_dir/worker_${i}.log" 2>/dev/null
