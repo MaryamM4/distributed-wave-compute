@@ -4,6 +4,12 @@ import time
 import numpy as np
 import redis
 import schrodinger_mod
+import sys
+import logging
+
+DEBUG_MODE = False
+
+REMOTE_DIR="/tmp"
 
 H_BAR = 1.054e-34
 MASS = 9.11e-31
@@ -19,42 +25,72 @@ redis_host = os.getenv("REDIS_HOST", "localhost")
 redis_port = int(os.getenv("REDIS_PORT", "6379"))
 redis_channel = f"{RUN_ID}:{os.environ.get('REDIS_CHANNEL', 'wave_channel')}"
 
-# Helper function for polling redis for values
-# Since multiple parts in program cannot continue without info being published
-def poll_redis_raw(r, key, sleep_interval=0.05, timeout=MAX_HANG_TIME, fail_quietly=False, default=None, job_idx=None):
+def setup_logger(job_idx):
+    logger = logging.getLogger(f"worker_{job_idx}")
+    level = logging.DEBUG if DEBUG_MODE else logging.INFO
+    logger.setLevel(level)
+
+    logger.propagate = False # Logs can duplicate in some environments
+    if logger.hasHandlers(): # Prevent duplicate handlers if re-run
+        logger.handlers.clear()
+
+    formatter = logging.Formatter(fmt=f"%(asctime)s [run:{RUN_ID}] [%(name)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+
+    # File output (persistent in container)
+    file_handler = logging.FileHandler(f"{REMOTE_DIR}/worker_{job_idx}.log", delay=False) 
+    file_handler.setFormatter(formatter)
+    file_handler.setLevel(level)
+
+    # Console output (for kubectl logs)
+    console_handler = logging.StreamHandler(sys.stdout) 
+    console_handler.setFormatter(formatter)
+    console_handler.setLevel(level)
+
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    return logger
+
+# Helper function for polling redis for values, since multiple parts in program cannot continue without info being published
+def poll_redis_raw(r, key, logger, sleep_interval=0.05, timeout=MAX_HANG_TIME, fail_quietly=False, default=None, job_idx=None):
     start = time.time()
-    #print(f"[worker-{job_idx}] [POLL-START] Waiting for key: {key}") 
+
+    logger.debug(f"Polling waiting for key {key} (start: {start:.3f}).")
     
     while not r.exists(key):
         if timeout is not None and (time.time() - start) > timeout:
+            mssg = f"Key '{key}' not found in Redis within timeout."
+
             if fail_quietly:
-                print((f"[worker-{job_idx}] [WARN] Key '{key}' not found in Redis within timeout."))
+                logger.warning(f"{mssg} Failed quietly.") 
                 return default
             
             else:
-                raise TimeoutError(f"[worker-{job_idx}] [ERROR] Key '{key}' not found in Redis within timeout.")
+                logger.error(mssg)
+                raise TimeoutError(mssg)
             
         time.sleep(sleep_interval)
 
-    #print(f"[worker-{job_idx}] [POLL-END] Received key: {key}") 
+    wait_time = time.time() - start
+    logger.debug(f"[POLL] Waited {wait_time:.3f}s for key {key}.")
+
     return r.get(key) # Do not .decode(), since not always expecting strings/json
 
 # @NOTE: Alternative options to sharing via Redis:
 # B. Compute initial matrix before launching workers, save to object storage (con: shared filesystem or S3 setup, so no).
 # C. Modify the Fortran function to only compute chunk. Favoring this option but am avoiding Fortran edits rn.
-def get_initial_state(r, job_idx, grid_size):
+def get_initial_state(r, job_idx, grid_size, logger):
     init_key = f"{RUN_ID}:initial_matrix"
 
     if job_idx == 0:  # (First job only) calls Fortran module to compute initial state
         matrix = np.zeros((grid_size, grid_size), dtype=np.float64, order="F")
         schrodinger_mod.schrodinger_mod.compute_wave_matrix(matrix=matrix, size_n=grid_size, num_steps=NUM_STEPS, h_bar=H_BAR, mass=MASS) 
         r.set(init_key, matrix.tobytes(), ex=TTL) # Publish initial grid for other workers to use
-        print(f"[worker-{job_idx}] [WRITE] Computed and stored initial grid in Redis.")
+        logger.info(f"[WRITE] Computed and stored initial grid in Redis.")
         
     else:
-        raw = poll_redis_raw(r, init_key, job_idx=job_idx)
+        raw = poll_redis_raw(r, init_key, job_idx=job_idx, logger=logger)
         matrix = np.frombuffer(raw, dtype=np.float64).copy().reshape((grid_size, grid_size))
-        print(f"[worker-{job_idx}] [READ] Retrieved initial grid from Redis.")
+        logger.info(f"[READ] Retrieved initial grid from Redis.")
     
     return matrix
 
@@ -68,33 +104,35 @@ def get_partition_edges(job_idx, total_jobs, grid_size):
 def deserialize_row(raw):
     return np.frombuffer(raw, dtype=np.complex128) if raw else None
 
-def push_edges(pipe, job_idx, chunk, step):
+def push_edges(pipe, job_idx, chunk, step, logger):
     top_key = f"{RUN_ID}:worker:{job_idx}:top:{step}"
     bot_key = f"{RUN_ID}:worker:{job_idx}:bottom:{step}"
 
     pipe.set(top_key, chunk[0, :].tobytes(), ex=TTL)
     pipe.set(bot_key, chunk[-1, :].tobytes(), ex=TTL)
 
-    print(f"[worker-{job_idx}] [WRITE] Step {step}: wrote edges to [{top_key}] and [{bot_key}].")
+    logger.info(f"[WRITE][step={step}] wrote edges to [{top_key}] and [{bot_key}].")
 
 # Blocks until read
-def pull_neighbor_edges(r, job_idx, total_jobs, step):
+def pull_neighbor_edges(r, job_idx, total_jobs, step, logger):
     top_neighbor = None
     bot_neighbor = None
 
     if job_idx > 0: 
         key = f"{RUN_ID}:worker:{job_idx-1}:bottom:{step}"
-        raw = poll_redis_raw(r, key, timeout=None, job_idx=job_idx) 
+        raw = poll_redis_raw(r, key, timeout=None, job_idx=job_idx, logger=logger) 
         top_neighbor = deserialize_row(raw)
 
-        print(f"[worker-{job_idx}] [READ] Step {step}: Received top neighbor from worker {job_idx-1} (key: {key}, shape={top_neighbor.shape}).")
+        t_shape = top_neighbor.shape if top_neighbor is not None else None
+        logger.info(f"[READ][step={step}] Received TOP neighbor from worker {job_idx-1} (key: {key}, shape={t_shape}).")
 
     if job_idx < total_jobs - 1:
         key = f"{RUN_ID}:worker:{job_idx+1}:top:{step}"
-        raw = poll_redis_raw(r, key, timeout=None, job_idx=job_idx) 
+        raw = poll_redis_raw(r, key, timeout=None, job_idx=job_idx, logger=logger) 
         bot_neighbor = deserialize_row(raw)
         
-        print(f"[worker-{job_idx}] [READ] Step {step}: Received bottom neighbor from worker {job_idx+1} (key: {key}, shape={bot_neighbor.shape}).")
+        b_shape = bot_neighbor.shape if bot_neighbor is not None else None
+        logger.info(f"[READ][step={step}] Received BOTTOM neighbor from worker {job_idx+1} (key: {key}, shape={b_shape}).")
     
     return top_neighbor, bot_neighbor
 
@@ -145,21 +183,28 @@ def main():
 
     # Determine current worker's reponsiblity
     start_row, end_row = get_partition_edges(job_idx, total_jobs, grid_size)
-    print(f"[worker-{job_idx}] [START] Planning {total_steps} steps for rows {start_row}-{end_row-1}.")
+
+    # Setup logging
+    logger = setup_logger(job_idx)
+
+    logger.info("Kubernetes containers are ephemeral; /tmp logs will be lost unless copied.")
+    logger.info("Use kubectl cp or your collect_worker_logs script.")
+
+    logger.info(f"[START] Planning {total_steps} steps for rows {start_row}-{end_row-1}.")
 
     # Prepare/get first frame (worker 0 uses Fortran module to compute it)
-    matrix = get_initial_state(r, job_idx, grid_size) # Will block until it's avilable
+    matrix = get_initial_state(r, job_idx, grid_size, logger=logger) # Will block until it's avilable
     chunk = matrix[start_row:end_row, :].astype(np.complex128)
-    print(f"Job {job_idx} published/Received initial matrix.")
 
     for step in range(total_steps): # "Animation" loop
+        step_start = time.time()
         ready_key = f"{RUN_ID}:ready:{step}"
         go_key = f"{RUN_ID}:go:{step}"
 
         # [Worker Boundary Exchange]
         push_pipe = r.pipeline()
         
-        push_edges(push_pipe, job_idx, chunk, step)
+        push_edges(push_pipe, job_idx, chunk, step, logger=logger)
         push_pipe.execute()       # Push edges first, then
         count = r.incr(ready_key) # mark this worker as ready
 
@@ -172,13 +217,18 @@ def main():
         
         # Wait for "go" to be published to check if its safe to read. 
         sleep = 0.0005         
-        start = time.time() 
+        wait_start = time.time() 
         while not r.exists(go_key):
-            if time.time() - start > MAX_HANG_TIME:
-                raise RuntimeError(f'Stuck waiting for "go" at step {step}')
+            if time.time() - wait_start > MAX_HANG_TIME:
+                mssg = f"Timeout waiting for 'go' signal at step {step}."
+                logger.error(f"[SYNC] {mssg}")
+                raise RuntimeError(mssg)
+            
             time.sleep(sleep)
+        
+        logger.debug(f"[SYNC][step={step}] barrier wait {time.time() - wait_start:.4f}s")
 
-        top_neighbor, bot_neighbor = pull_neighbor_edges(r, job_idx, total_jobs, step) 
+        top_neighbor, bot_neighbor = pull_neighbor_edges(r, job_idx, total_jobs, step, logger=logger) 
 
         # [Computation]
         extended = build_extended(chunk, top_neighbor, bot_neighbor) #  Edges need to see neighbors for laplacian
@@ -193,9 +243,11 @@ def main():
             message = {"worker": job_idx, "step": step, "start_row": start_row, "data": np.abs(chunk).tolist()}
 
             r.publish(redis_channel, json.dumps(message))
-            print(f"[worker-{job_idx}] [PUB] Step {step}: published chunk to channel [{redis_channel}]")
+            logger.info(f"[PUB][step={step}] published chunk to channel [{redis_channel}]")
+        
+        logger.debug(f"[STEP] {step} completed (Write> Sync> Read> Compute> Pub) in {time.time() - step_start:.4f}s.")
 
-    print(f"[worker-{job_idx}] [FIN] {total_steps} steps completed for rows {start_row}-{end_row-1}.")
+    logger.info(f"[FIN] {total_steps} steps completed for rows {start_row}-{end_row-1}.")
 
 if __name__ == "__main__":
     main()
