@@ -62,9 +62,9 @@ def deserialize_row(raw):
     return np.frombuffer(raw, dtype=np.complex128) if raw else None
 
 # Removed TTL, but causing memory build-up. @TODO something about it.
-def push_edges(r, job_idx, chunk, step):
-    r.set(f"worker:{job_idx}:top:{step}", chunk[0, :].tobytes())
-    r.set(f"worker:{job_idx}:bottom:{step}", chunk[-1, :].tobytes())
+def push_edges(pipe, job_idx, chunk, step):
+    pipe.set(f"worker:{job_idx}:top:{step}", chunk[0, :].tobytes())
+    pipe.set(f"worker:{job_idx}:bottom:{step}", chunk[-1, :].tobytes())
 
 # Blocks until read
 def pull_neighbor_edges(r, job_idx, total_jobs, step):
@@ -137,25 +137,31 @@ def main():
     print(f"Job {job_idx} working on rows {start_row}-{end_row-1}.")
 
     for step in range(total_steps): # "Animation" loop
-        # [Worker Boundary Exchange]
-        # Publish edges and mark this worker as ready
-        push_edges(r, job_idx, chunk, step)
-
         ready_key = f"ready:{step}"
         go_key = f"go:{step}"
+        pipe = r.pipeline()
 
-        count = r.incr(ready_key)
+        # [Worker Boundary Exchange]
+        push_edges(pipe, job_idx, chunk, step) # Publish edges and
+        pipe.incr(ready_key)           # mark this worker as ready.
 
-        if count == total_jobs: # Last worker to finish signals "go"...
-            r.set(go_key, 1)
-            if step > 0:  # ...& cleans up stale memory to prevent buildup.
-                r.delete(f"ready:{step-1}", f"go:{step-1}")            
+        results = pipe.execute()  # Read how many workers ready.
+        count = results[-1]
 
-        while not r.exists(go_key): # Others wait for "go" to be published.
-            time.sleep(0.0005)
+        if count == total_jobs:  # If last worker to finish, signal "go", 
+            pipe = r.pipeline()
+            pipe.set(go_key, 1) 
+
+            if step > 0:    # & clean up stale memory to prevent buildup.
+                pipe.delete(f"ready:{step-1}", f"go:{step-1}")
+            pipe.execute()
         
-        # Once everyone is ready, know if safe to read neighbors
-        top_neighbor, bottom_neighbor = pull_neighbor_edges(r, job_idx, total_jobs, step)
+        sleep = 0.0005  # Wait for "go" to be published to check if its safe to read. 
+        while not r.exists(go_key):
+            time.sleep(sleep)
+            sleep = min(sleep * 1.2, 0.005)
+
+        top_neighbor, bottom_neighbor = pull_neighbor_edges(r, job_idx, total_jobs, step) 
 
         # [Computation]
         extended = build_extended(chunk, top_neighbor, bottom_neighbor) #  Edges need to see neighbors for laplacian
@@ -171,7 +177,6 @@ def main():
             r.publish(redis_channel, json.dumps(message))
 
             print(f"Worker {job_idx} Published step {step}")
-
 
     print(f"Worker {job_idx} completed rows {start_row}-{end_row-1}.")
 
