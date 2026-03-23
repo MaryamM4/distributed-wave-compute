@@ -20,7 +20,8 @@ redis_channel = os.environ.get("REDIS_CHANNEL", "wave_channel")
 # Since multiple parts in program cannot continue without info being published
 def poll_redis_raw(r, key, sleep_interval=0.05, timeout=None, fail_quetly=False, default=None):
     start = time.time()
-
+    print(f"[Poll Start] Waiting for key: {key}") # Temp dubeug line. DELETE ME. 
+    
     while not r.exists(key):
         if timeout is not None and (time.time() - start) > timeout:
             if fail_quetly:
@@ -32,6 +33,7 @@ def poll_redis_raw(r, key, sleep_interval=0.05, timeout=None, fail_quetly=False,
             
         time.sleep(sleep_interval)
 
+    print(f"[Poll End] Recieved key: {key}") # Temp dubeug line. DELETE ME. 
     return r.get(key) # Do not .decode(), since not always expecting strings/json
 
 # @NOTE: Alternative options to sharing via Redis:
@@ -145,7 +147,7 @@ def main():
         # [Worker Boundary Exchange]
         push_edges(pipe, job_idx, chunk, step)
         results = pipe.execute() # Push edges first, then
-        
+
         pipe.incr(ready_key)  # mark this worker as ready
 
         count = results[-1]
@@ -165,6 +167,7 @@ def main():
             time.sleep(sleep)
             sleep = min(sleep * 1.2, 0.005)
 
+        print(f"Worker {job_idx} pulling neighbors for step {step}") # Temp debug line. DELETE ME
         top_neighbor, bottom_neighbor = pull_neighbor_edges(r, job_idx, total_jobs, step) 
 
         # [Computation]
