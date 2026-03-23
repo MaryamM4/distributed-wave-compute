@@ -155,7 +155,7 @@ def main():
         count = r.incr(ready_key) # mark this worker as ready
 
         if count >= total_jobs:  # If last worker to finish, signal "go", 
-            r.setnx(go_key, 1, ex=TTL) 
+            r.setnx(go_key, 1) 
             # Temporarily avoid cleanup for now. 
             # Possible issue: A deletes ready:0 while B hasn't read it yet.
             #if step > 0:    # & clean up stale memory to prevent buildup.
