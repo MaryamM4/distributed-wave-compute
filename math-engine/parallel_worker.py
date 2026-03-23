@@ -8,6 +8,7 @@ import sys
 import logging
 
 DEBUG_MODE = False
+LINGER_SECONDS = 600 # Keep pod alive for 10 mins
 
 REMOTE_DIR="/tmp"
 
@@ -32,7 +33,7 @@ def setup_logger(job_idx):
 
     logger.propagate = False # Logs can duplicate in some environments
     if logger.hasHandlers(): # Prevent duplicate handlers if re-run
-        logger.handlers.clear()
+        logger.handlers.clear()  
 
     formatter = logging.Formatter(fmt=f"%(asctime)s [run:{RUN_ID}] [%(name)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 
@@ -111,7 +112,7 @@ def push_edges(pipe, job_idx, chunk, step, logger):
     pipe.set(top_key, chunk[0, :].tobytes(), ex=TTL)
     pipe.set(bot_key, chunk[-1, :].tobytes(), ex=TTL)
 
-    logger.info(f"[WRITE][step={step}] wrote edges to [{top_key}] and [{bot_key}].")
+    logger.info(f"[WRITE][step {step:<{step_width}d}] wrote edges to [{top_key}] and [{bot_key}].")
 
 # Blocks until read
 def pull_neighbor_edges(r, job_idx, total_jobs, step, logger):
@@ -124,7 +125,7 @@ def pull_neighbor_edges(r, job_idx, total_jobs, step, logger):
         top_neighbor = deserialize_row(raw)
 
         t_shape = top_neighbor.shape if top_neighbor is not None else None
-        logger.info(f"[READ][step={step}] Received TOP neighbor from worker {job_idx-1} (key: {key}, shape={t_shape}).")
+        logger.info(f"[READ][step {step:<{step_width}d}] Received TOP neighbor from worker {job_idx-1} (key: {key}, shape={t_shape}).")
 
     if job_idx < total_jobs - 1:
         key = f"{RUN_ID}:worker:{job_idx+1}:top:{step}"
@@ -132,7 +133,7 @@ def pull_neighbor_edges(r, job_idx, total_jobs, step, logger):
         bot_neighbor = deserialize_row(raw)
         
         b_shape = bot_neighbor.shape if bot_neighbor is not None else None
-        logger.info(f"[READ][step={step}] Received BOTTOM neighbor from worker {job_idx+1} (key: {key}, shape={b_shape}).")
+        logger.info(f"[READ][step {step:<{step_width}d}] Received BOTTOM neighbor from worker {job_idx+1} (key: {key}, shape={b_shape}).")
     
     return top_neighbor, bot_neighbor
 
@@ -173,6 +174,7 @@ def build_extended(chunk, top_neighbor, bot_neighbor):
 def main():
     # Read environment variables
     total_steps = int(os.getenv("TOTAL_STEPS", "100")) 
+    step_width = len(str(total_steps))
     grid_size = int(os.getenv("GRID_SIZE", "200"))
     
     job_idx = int(os.environ.get("JOB_COMPLETION_INDEX", "0"))  # 0-based worker index
@@ -188,7 +190,7 @@ def main():
     logger = setup_logger(job_idx)
 
     logger.info("Kubernetes containers are ephemeral; /tmp logs will be lost unless copied.")
-    logger.info("Use kubectl cp or your collect_worker_logs script.")
+    logger.info("Use kubectl cp or your collect_worker_logs script (Linger duration: {LINGER_SECONDS} seconds).")
 
     logger.info(f"[START] Planning {total_steps} steps for rows {start_row}-{end_row-1}.")
 
@@ -226,7 +228,7 @@ def main():
             
             time.sleep(sleep)
         
-        logger.debug(f"[SYNC][step={step}] barrier wait {time.time() - wait_start:.4f}s")
+        logger.debug(f"[SYNC][step {step:<{step_width}d}] barrier wait {time.time() - wait_start:.4f}s")
 
         top_neighbor, bot_neighbor = pull_neighbor_edges(r, job_idx, total_jobs, step, logger=logger) 
 
@@ -243,11 +245,13 @@ def main():
             message = {"worker": job_idx, "step": step, "start_row": start_row, "data": np.abs(chunk).tolist()}
 
             r.publish(redis_channel, json.dumps(message))
-            logger.info(f"[PUB][step={step}] published chunk to channel [{redis_channel}]")
+            logger.info(f"[PUB][step {step:<{step_width}d}] published chunk to channel [{redis_channel}]")
         
         logger.debug(f"[STEP] {step} completed (Write> Sync> Read> Compute> Pub) in {time.time() - step_start:.4f}s.")
 
     logger.info(f"[FIN] {total_steps} steps completed for rows {start_row}-{end_row-1}.")
+
+    time.sleep(LINGER_SECONDS) 
 
 if __name__ == "__main__":
     main()
