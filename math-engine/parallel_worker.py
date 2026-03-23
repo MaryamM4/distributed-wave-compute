@@ -154,7 +154,7 @@ def main():
 
         if count >= total_jobs:  # If last worker to finish, signal "go", 
             pipe = r.pipeline()
-            pipe.set(go_key, 1) 
+            pipe.setnx(go_key, 1) 
 
             # Temporarily avoid cleanup for now. 
             # Possible issue: A deletes ready:0 while B hasn't read it yet.
