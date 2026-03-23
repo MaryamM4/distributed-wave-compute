@@ -143,10 +143,11 @@ def main():
         pipe = r.pipeline()
 
         # [Worker Boundary Exchange]
-        push_edges(pipe, job_idx, chunk, step) # Publish edges and
-        pipe.incr(ready_key)           # mark this worker as ready.
+        push_edges(pipe, job_idx, chunk, step)
+        results = pipe.execute() # Push edges first, then
+        
+        pipe.incr(ready_key)  # mark this worker as ready
 
-        results = pipe.execute()  # Read how many workers ready.
         count = results[-1]
 
         if count >= total_jobs:  # If last worker to finish, signal "go", 
