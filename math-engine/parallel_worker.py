@@ -153,8 +153,10 @@ def main():
             pipe = r.pipeline()
             pipe.set(go_key, 1) 
 
-            if step > 0:    # & clean up stale memory to prevent buildup.
-                pipe.delete(f"ready:{step-1}", f"go:{step-1}")
+            # Temporarily avoid cleanup for now. 
+            # Possible issue: A deletes ready:0 while B hasn't read it yet.
+            #if step > 0:    # & clean up stale memory to prevent buildup.
+            #    pipe.delete(f"ready:{step-1}", f"go:{step-1}")
             pipe.execute()
         
         sleep = 0.0005  # Wait for "go" to be published to check if its safe to read. 
