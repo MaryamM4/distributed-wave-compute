@@ -153,14 +153,11 @@ def main():
         count = results[-1]
 
         if count >= total_jobs:  # If last worker to finish, signal "go", 
-            pipe = r.pipeline()
             pipe.setnx(go_key, 1) 
-
             # Temporarily avoid cleanup for now. 
             # Possible issue: A deletes ready:0 while B hasn't read it yet.
             #if step > 0:    # & clean up stale memory to prevent buildup.
             #    pipe.delete(f"ready:{step-1}", f"go:{step-1}")
-            pipe.execute()
         
         sleep = 0.0005  # Wait for "go" to be published to check if its safe to read. 
         while not r.exists(go_key):
