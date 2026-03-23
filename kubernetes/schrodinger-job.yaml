@@ -40,6 +40,9 @@ spec:
         - name: REDIS_PORT
           value: "6379"
 
+        - name: RUN_ID
+          value: "${RUN_ID}"
+
         volumeMounts:
         - name: results-storage
           mountPath: /data

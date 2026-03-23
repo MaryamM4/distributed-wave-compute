@@ -56,7 +56,6 @@ GitLab Validation
 - Verify you see "Build Complete!" at the end.
 
 
-
 Local check:
 ``aws configure``
 (grab access keys: https://dovzji14roepy.cloudfront.net/ > Login to Account > Access keys)

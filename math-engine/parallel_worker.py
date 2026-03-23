@@ -11,20 +11,23 @@ DT = 0.0005
 NUM_STEPS = 1
 
 PUBLISH_INTERVAL = 500
+TTL = 10800 # Long enough that it won't expire mid-work
+MAX_HANG_TIME = 3600
 
+RUN_ID = os.getenv("RUN_ID", "-1")
 redis_host = os.getenv("REDIS_HOST", "localhost")
 redis_port = int(os.getenv("REDIS_PORT", "6379"))
-redis_channel = os.environ.get("REDIS_CHANNEL", "wave_channel")
+redis_channel = f"{RUN_ID}:{os.environ.get('REDIS_CHANNEL', 'wave_channel')}"
 
 # Helper function for polling redis for values
 # Since multiple parts in program cannot continue without info being published
-def poll_redis_raw(r, key, sleep_interval=0.05, timeout=None, fail_quetly=False, default=None):
+def poll_redis_raw(r, key, sleep_interval=0.05, timeout=MAX_HANG_TIME, fail_quietly=False, default=None):
     start = time.time()
     print(f"[Poll Start] Waiting for key: {key}") # Temp dubeug line. DELETE ME. 
     
     while not r.exists(key):
         if timeout is not None and (time.time() - start) > timeout:
-            if fail_quetly:
+            if fail_quietly:
                 print((f"[WARN] Key '{key}' not found in Redis within timeout."))
                 return default
             
@@ -41,14 +44,15 @@ def poll_redis_raw(r, key, sleep_interval=0.05, timeout=None, fail_quetly=False,
 # C. Modify the Fortran function to only compute chunk. Favoring this option but am avoiding Fortran edits rn.
 # D. MPI instead of Redis (goes against instructions).
 def get_initial_state(r, job_idx, grid_size):
+    init_key = f"{RUN_ID}:initial_matrix"
+
     if job_idx == 0:  # (First job only) calls Fortran module to compute initial state
         matrix = np.zeros((grid_size, grid_size), dtype=np.float64, order="F")
         schrodinger_mod.schrodinger_mod.compute_wave_matrix(matrix=matrix, size_n=grid_size, num_steps=NUM_STEPS, h_bar=H_BAR, mass=MASS) 
-
-        r.set("initial_matrix", matrix.tobytes()) # Publish initial grid for other workers to use
+        r.set(init_key, matrix.tobytes(), ex=TTL) # Publish initial grid for other workers to use
         
     else:
-        raw = poll_redis_raw(r, "initial_matrix")
+        raw = poll_redis_raw(r, init_key)
         matrix = np.frombuffer(raw, dtype=np.float64).copy().reshape((grid_size, grid_size))
     
     return matrix
@@ -65,8 +69,8 @@ def deserialize_row(raw):
 
 # Removed TTL, but causing memory build-up. @TODO something about it.
 def push_edges(pipe, job_idx, chunk, step):
-    pipe.set(f"worker:{job_idx}:top:{step}", chunk[0, :].tobytes())
-    pipe.set(f"worker:{job_idx}:bottom:{step}", chunk[-1, :].tobytes())
+    pipe.set(f"{RUN_ID}:worker:{job_idx}:top:{step}", chunk[0, :].tobytes(), ex=TTL)
+    pipe.set(f"{RUN_ID}:worker:{job_idx}:bottom:{step}", chunk[-1, :].tobytes(), ex=TTL)
 
 # Blocks until read
 def pull_neighbor_edges(r, job_idx, total_jobs, step):
@@ -74,12 +78,12 @@ def pull_neighbor_edges(r, job_idx, total_jobs, step):
     bottom_neighbor = None
 
     if job_idx > 0: 
-        key = f"worker:{job_idx-1}:bottom:{step}"
+        key = f"{RUN_ID}:worker:{job_idx-1}:bottom:{step}"
         raw = poll_redis_raw(r, key, timeout=None) 
         top_neighbor = deserialize_row(raw)
 
     if job_idx < total_jobs - 1:
-        key = f"worker:{job_idx+1}:top:{step}"
+        key = f"{RUN_ID}:worker:{job_idx+1}:top:{step}"
         raw = poll_redis_raw(r, key, timeout=None) 
         bottom_neighbor = deserialize_row(raw)
     
@@ -140,29 +144,30 @@ def main():
     print(f"Job {job_idx} published/recieved initial matrix.")
 
     for step in range(total_steps): # "Animation" loop
-        ready_key = f"ready:{step}"
-        go_key = f"go:{step}"
-        pipe = r.pipeline()
+        ready_key = f"{RUN_ID}:ready:{step}"
+        go_key = f"{RUN_ID}:go:{step}"
 
         # [Worker Boundary Exchange]
-        push_edges(pipe, job_idx, chunk, step)
-        results = pipe.execute() # Push edges first, then
-
-        pipe.incr(ready_key)  # mark this worker as ready
-
-        count = results[-1]
+        push_pipe = r.pipeline()
+        
+        push_edges(push_pipe, job_idx, chunk, step)
+        push_pipe.execute()       # Push edges first, then
+        count = r.incr(ready_key) # mark this worker as ready
 
         if count >= total_jobs:  # If last worker to finish, signal "go", 
-            pipe.setnx(go_key, 1) 
+            r.setnx(go_key, 1, ex=TTL) 
             # Temporarily avoid cleanup for now. 
             # Possible issue: A deletes ready:0 while B hasn't read it yet.
             #if step > 0:    # & clean up stale memory to prevent buildup.
             #    pipe.delete(f"ready:{step-1}", f"go:{step-1}")
         
-        sleep = 0.0005  # Wait for "go" to be published to check if its safe to read. 
+        # Wait for "go" to be published to check if its safe to read. 
+        sleep = 0.0005         
+        start = time.time() 
         while not r.exists(go_key):
+            if time.time() - start > MAX_HANG_TIME:
+                raise RuntimeError(f'Stuck waiting for "go" at step {step}')
             time.sleep(sleep)
-            sleep = min(sleep * 1.2, 0.005)
 
         print(f"Worker {job_idx} pulling neighbors for step {step}") # Temp debug line. DELETE ME
         top_neighbor, bottom_neighbor = pull_neighbor_edges(r, job_idx, total_jobs, step) 
