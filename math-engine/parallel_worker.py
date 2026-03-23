@@ -16,7 +16,6 @@ redis_host = os.getenv("REDIS_HOST", "localhost")
 redis_port = int(os.getenv("REDIS_PORT", "6379"))
 redis_channel = os.environ.get("REDIS_CHANNEL", "wave_channel")
 
-
 # Helper function for polling redis for values
 # Since multiple parts in program cannot continue without info being published
 def poll_redis_raw(r, key, sleep_interval=0.05, timeout=None, fail_quetly=False, default=None):
@@ -60,41 +59,48 @@ def get_partition_edges(job_idx, total_jobs, grid_size):
     return start, end
 
 def serialize_complex_row(row):
-    return json.dumps([{"r": float(x.real), "i": float(x.imag)} for x in row])
+    return json.dumps([{"r": float(x.real), "i": float(x.imag)} for x in row]) if row else None
 def deserialize_complex_row(data):
+    if data is None:
+        return None
     arr = json.loads(data)
     return np.array([complex(x["r"], x["i"]) for x in arr])
+def deserialize_row(raw):
+    return np.frombuffer(raw, dtype=np.complex128) if raw else None
 
-def push_edges(r, job_idx, chunk):
-    r.set(f"worker:{job_idx}:top", serialize_complex_row(chunk[0, :]))
-    r.set(f"worker:{job_idx}:bottom", serialize_complex_row(chunk[-1, :]))
+# TTL prevents memory from growing unbounded,
+# but since reads block on non-existing data, will freeze program.
+def push_edges(r, job_idx, chunk, step, TTL_SECS=60):
+    r.set(f"worker:{job_idx}:top:{step}", chunk[0, :].tobytes(), ex=TTL_SECS)
+    r.set(f"worker:{job_idx}:bottom:{step}", chunk[-1, :].tobytes(), ex=TTL_SECS)
 
-def pull_neighbor_edges(r, job_idx, total_jobs):
+# @TODO: Am debating wether to use poll_redis_raw, blocking, or if skipping
+#        unpublished neighbors is acceptable for speed. Not critical rn.
+# If read times out, return null (signals to keep stale neighbor data).
+def pull_neighbor_edges(r, job_idx, total_jobs, step, FAIL_AFTER_SECS=30):
     top_neighbor = None
     bottom_neighbor = None
 
-    # @TODO: Am debating wether to use poll_redis_raw or if skipping
-    #        unpublished neighbors is acceptable for speed. Not critical rn.
     if job_idx > 0: 
-        data = r.get(f"worker:{job_idx-1}:bottom")
-        if data:
-            top_neighbor = deserialize_complex_row(data)
+        key = f"worker:{job_idx-1}:bottom:{step}"
+        raw = poll_redis_raw(r, key, timeout=FAIL_AFTER_SECS, fail_quetly=True, default=None) 
+        top_neighbor = deserialize_row(raw)
 
     if job_idx < total_jobs - 1:
-        data = r.get(f"worker:{job_idx+1}:top")
-        if data:
-            bottom_neighbor = deserialize_complex_row(data)
+        key = f"worker:{job_idx+1}:top:{step}"
+        raw = poll_redis_raw(r, key, timeout=FAIL_AFTER_SECS, fail_quetly=True, default=None) 
+        bottom_neighbor = deserialize_row(raw)
     
     return top_neighbor, bottom_neighbor
 
 def compute_laplacian(grid):
     # np.roll shifts the grid to easily grab adjacent cells
-    return ( 
-        np.roll(grid, -1, axis=0) +  # Up neighbor
-        np.roll(grid, 1, axis=0) +   # Down neighbor
-        np.roll(grid, -1, axis=1) +  # Right neighbor
-        np.roll(grid, 1, axis=1) -   # Left neighbor
-        4 * grid                     # Center cell * 4
+    return (
+        np.roll(grid, -1, axis=0) +   # Up neighbor
+        np.roll(grid, 1, axis=0) +    # Down neighbor
+        np.roll(grid, -1, axis=1) +   # Right neighbor
+        np.roll(grid, 1, axis=1) -    # Left neighbor
+        4 * grid                      # Center cell * 4
     )
 
 # Forces outer edges of the grid to stay at 0 so the wave bounces.
@@ -111,6 +117,16 @@ def trim_ghost_rows(grid, top_neighbor, bottom_neighbor):
         grid = grid[:-1, :]
     return grid
 
+def build_extended(chunk, top_neighbor, bottom_neighbor):
+    rows = []
+    if top_neighbor is not None:
+        rows.append(top_neighbor)
+    rows.append(chunk)
+    if bottom_neighbor is not None:
+        rows.append(bottom_neighbor)
+
+    return np.vstack(rows)
+
 def main():
     # Read environment variables
     total_steps = int(os.getenv("TOTAL_STEPS", "100")) 
@@ -123,33 +139,48 @@ def main():
     r = redis.Redis(host=redis_host, port=redis_port)
 
     # Prepare/get first frame (worker 0 uses Fortran module to compute it)
-    matrix = get_initial_state(r, job_idx, grid_size)
+    matrix = get_initial_state(r, job_idx, grid_size) # Will block until it's avilable
 
     # Determine current worker's reponsiblity
     start_row, end_row = get_partition_edges(job_idx, total_jobs, grid_size)
     print(f"Job {job_idx} working on rows {start_row}-{end_row-1}.")
 
     chunk = matrix[start_row:end_row, :].astype(np.complex128)
-    extended = chunk # "Extended" will accomodate neighbors 
+
+    # To tolerate stale data, need to keep track of it.
+    last_top = matrix[start_row - 1, :].astype(np.complex128) if job_idx > 0 else None
+    last_bottom = matrix[end_row, :].astype(np.complex128) if job_idx < total_jobs - 1 else None
+    tn_last_update = 0
+    bn_last_update = 0
 
     for step in range(total_steps): # "Animation" loop
         # Boundary exchange 
-        push_edges(r, job_idx, chunk)
+        push_edges(r, job_idx, chunk, step)
         time.sleep(0.001) # To avoid Redis thrashing & provide sync delay before neighbors write
-        top_neighbor, bottom_neighbor = pull_neighbor_edges(r, job_idx, total_jobs)
+        top_neighbor, bottom_neighbor = pull_neighbor_edges(r, job_idx, total_jobs, step)
 
-        # Edges need to see neighbors for laplacian
-        extended[1:-1, :] = chunk    # Fill center (chunk)
-        if top_neighbor is not None: # Fill ghost rows (neighbors)
-            extended = np.vstack([top_neighbor, extended])
+        # If timed-out on read, keep stale neighbor data.
+        if top_neighbor is not None:
+            last_top = top_neighbor
+            tn_last_update = step
+        else:
+            top_neighbor = last_top
+            print((f"[WARN] Job {job_idx} is on step {step}. Top neighbor data is stale (step {tn_last_update})."))
         if bottom_neighbor is not None:
-            extended = np.vstack([extended, bottom_neighbor])
+            last_bottom = bottom_neighbor
+            bn_last_update = step
+        else:
+            bottom_neighbor = last_bottom
+            print((f"[WARN] Job {job_idx} is on step {step}. Bottom neighbor data is stale (step {bn_last_update})."))
+
+        # Edges need to see neighbors for laplacian. 
+        extended = build_extended(chunk, top_neighbor, bottom_neighbor)
 
         laplacian = compute_laplacian(extended)  # Neighbor math: Up + Down + Left + Right - 4*(Center)
         laplacian = trim_ghost_rows(laplacian, top_neighbor, bottom_neighbor) 
 
         chunk += 1j * laplacian * DT # Update wave
-        apply_boundary(laplacian)    # Force outer edges of grid to stay at 0 so the wave bounces.
+        apply_boundary(chunk)        # Force outer edges of grid to stay at 0 so the wave bounces.
 
         # Prepare message and publish to redis (periodically to avoid spam)
         if step % PUBLISH_INTERVAL == 0:
