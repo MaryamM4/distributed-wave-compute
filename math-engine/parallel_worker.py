@@ -23,20 +23,20 @@ redis_channel = f"{RUN_ID}:{os.environ.get('REDIS_CHANNEL', 'wave_channel')}"
 # Since multiple parts in program cannot continue without info being published
 def poll_redis_raw(r, key, sleep_interval=0.05, timeout=MAX_HANG_TIME, fail_quietly=False, default=None, job_idx=None):
     start = time.time()
-    #print(f"[J{job_idx}-POLL-START] Waiting for key: {key}") 
+    #print(f"[worker-{job_idx}] [POLL-START] Waiting for key: {key}") 
     
     while not r.exists(key):
         if timeout is not None and (time.time() - start) > timeout:
             if fail_quietly:
-                print((f"[J{job_idx}-WARN] Key '{key}' not found in Redis within timeout."))
+                print((f"[worker-{job_idx}] [WARN] Key '{key}' not found in Redis within timeout."))
                 return default
             
             else:
-                raise TimeoutError(f"[J{job_idx}-ERROR] Key '{key}' not found in Redis within timeout.")
+                raise TimeoutError(f"[worker-{job_idx}] [ERROR] Key '{key}' not found in Redis within timeout.")
             
         time.sleep(sleep_interval)
 
-    #print(f"[J{job_idx}-POLL-END] Received key: {key}") 
+    #print(f"[worker-{job_idx}] [POLL-END] Received key: {key}") 
     return r.get(key) # Do not .decode(), since not always expecting strings/json
 
 # @NOTE: Alternative options to sharing via Redis:
@@ -49,12 +49,12 @@ def get_initial_state(r, job_idx, grid_size):
         matrix = np.zeros((grid_size, grid_size), dtype=np.float64, order="F")
         schrodinger_mod.schrodinger_mod.compute_wave_matrix(matrix=matrix, size_n=grid_size, num_steps=NUM_STEPS, h_bar=H_BAR, mass=MASS) 
         r.set(init_key, matrix.tobytes(), ex=TTL) # Publish initial grid for other workers to use
-        print(f"[J{job_idx}-WRITE] Computed and stored initial grid in Redis.")
+        print(f"[worker-{job_idx}] [WRITE] Computed and stored initial grid in Redis.")
         
     else:
         raw = poll_redis_raw(r, init_key, job_idx=job_idx)
         matrix = np.frombuffer(raw, dtype=np.float64).copy().reshape((grid_size, grid_size))
-        print(f"[J{job_idx}-READ] Retrieved initial grid from Redis.")
+        print(f"[worker-{job_idx}] [READ] Retrieved initial grid from Redis.")
     
     return matrix
 
@@ -75,7 +75,7 @@ def push_edges(pipe, job_idx, chunk, step):
     pipe.set(top_key, chunk[0, :].tobytes(), ex=TTL)
     pipe.set(bot_key, chunk[-1, :].tobytes(), ex=TTL)
 
-    print(f"[J{job_idx}-WRITE] Step {step}: wrote edges to [{top_key}] and [{bot_key}].")
+    print(f"[worker-{job_idx}] [WRITE] Step {step}: wrote edges to [{top_key}] and [{bot_key}].")
 
 # Blocks until read
 def pull_neighbor_edges(r, job_idx, total_jobs, step):
@@ -87,14 +87,14 @@ def pull_neighbor_edges(r, job_idx, total_jobs, step):
         raw = poll_redis_raw(r, key, timeout=None, job_idx=job_idx) 
         top_neighbor = deserialize_row(raw)
 
-        print(f"[J{job_idx}-READ] Step {step}: Received top neighbor from worker {job_idx-1} (key: {key}, shape={top_neighbor.shape}).")
+        print(f"[worker-{job_idx}] [READ] Step {step}: Received top neighbor from worker {job_idx-1} (key: {key}, shape={top_neighbor.shape}).")
 
     if job_idx < total_jobs - 1:
         key = f"{RUN_ID}:worker:{job_idx+1}:top:{step}"
         raw = poll_redis_raw(r, key, timeout=None, job_idx=job_idx) 
         bot_neighbor = deserialize_row(raw)
         
-        print(f"[J{job_idx}-READ] Step {step}: Received bottom neighbor from worker {job_idx+1} (key: {key}, shape={bot_neighbor.shape}).")
+        print(f"[worker-{job_idx}] [READ] Step {step}: Received bottom neighbor from worker {job_idx+1} (key: {key}, shape={bot_neighbor.shape}).")
     
     return top_neighbor, bot_neighbor
 
@@ -145,7 +145,7 @@ def main():
 
     # Determine current worker's reponsiblity
     start_row, end_row = get_partition_edges(job_idx, total_jobs, grid_size)
-    print(f"[J{job_idx}-START] Planning {total_steps} steps for rows {start_row}-{end_row-1}.")
+    print(f"[worker-{job_idx}] [START] Planning {total_steps} steps for rows {start_row}-{end_row-1}.")
 
     # Prepare/get first frame (worker 0 uses Fortran module to compute it)
     matrix = get_initial_state(r, job_idx, grid_size) # Will block until it's avilable
@@ -193,9 +193,9 @@ def main():
             message = {"worker": job_idx, "step": step, "start_row": start_row, "data": np.abs(chunk).tolist()}
 
             r.publish(redis_channel, json.dumps(message))
-            print(f"[J{job_idx}-PUB] Step {step}: published chunk to channel [{redis_channel}]")
+            print(f"[worker-{job_idx}] [PUB] Step {step}: published chunk to channel [{redis_channel}]")
 
-    print(f"[J{job_idx}-FIN] {total_steps} steps completed for rows {start_row}-{end_row-1}.")
+    print(f"[worker-{job_idx}] [FIN] {total_steps} steps completed for rows {start_row}-{end_row-1}.")
 
 if __name__ == "__main__":
     main()
