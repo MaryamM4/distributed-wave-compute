@@ -30,12 +30,17 @@ RUN f2py -c -m schrodinger_mod schrodinger.f90 --fcompiler=gnu95
 # STAGE 2: RUNTIME CONTAINER 
 FROM python:3.12-slim
 
+# Make Python print immediately (no buffering)
+ENV PYTHONUNBUFFERED=1
+
 WORKDIR /app
 
 # Install runtime libs required by Fortran and redis-cli
+# procps: ps, top, free, uptime
 RUN apt-get update && apt-get install -y \
     libgfortran5 \
     redis-tools \
+    procps \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python dependencies

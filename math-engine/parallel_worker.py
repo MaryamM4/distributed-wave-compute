@@ -123,7 +123,7 @@ def main():
     grid_size = int(os.getenv("GRID_SIZE", "200"))
     
     job_idx = int(os.environ.get("JOB_COMPLETION_INDEX", "0"))  # 0-based worker index
-    total_jobs = int(os.getenv("TOTAL_JOBS", "10"))    
+    total_jobs = int(os.getenv("TOTAL_JOBS", "5"))    
 
     # Setup redis connection
     r = redis.Redis(host=redis_host, port=redis_port)
