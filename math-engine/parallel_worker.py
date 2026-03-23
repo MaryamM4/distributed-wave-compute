@@ -149,7 +149,7 @@ def main():
         results = pipe.execute()  # Read how many workers ready.
         count = results[-1]
 
-        if count == total_jobs:  # If last worker to finish, signal "go", 
+        if count >= total_jobs:  # If last worker to finish, signal "go", 
             pipe = r.pipeline()
             pipe.set(go_key, 1) 
 
