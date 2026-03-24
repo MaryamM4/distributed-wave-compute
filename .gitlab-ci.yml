@@ -16,7 +16,7 @@ build_image:
     - pip install awscli
   script:
     - echo "Building Docker Image..."
-    - docker build --provenance=false --platform linux/amd64 -t $ECR_REPOSITORY:$CI_COMMIT_SHORT_SHA ./math-engine
+    - docker build --provenance=false --platform linux/amd64 -t $ECR_REPOSITORY:$CI_COMMIT_SHORT_SHA ./services/math-engine
     - echo "Build completed."
 
 # Test build
@@ -27,7 +27,7 @@ test_build:
     - docker:24.0.5-dind
   script:
     - echo "Testing Docker build..."
-    - docker build --provenance=false --platform linux/amd64 -t verify-build ./math-engine
+    - docker build --provenance=false --platform linux/amd64 -t verify-build ./services/math-engine
     - echo "Test successful."
   needs: ["build_image"]
 
@@ -46,7 +46,7 @@ deploy_ecr:
     - echo "Starting Deployment to ECR..."
 
     # Needs to build again for the image to also exist in this job
-    - docker build --provenance=false --platform linux/amd64 -t $ECR_REPOSITORY:$CI_COMMIT_SHORT_SHA ./math-engine
+    - docker build --provenance=false --platform linux/amd64 -t $ECR_REPOSITORY:$CI_COMMIT_SHORT_SHA ./services/math-engine
 
     - echo "Authenticating with AWS..."
     - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
@@ -106,7 +106,7 @@ deploy_k8s:
     - RUN_ID=$(cat /proc/sys/kernel/random/uuid)
     - echo "RUN_ID=$RUN_ID"
     - >
-      envsubst '${AWS_ACCOUNT_ID} ${AWS_DEFAULT_REGION} ${ECR_REPOSITORY} ${CI_COMMIT_SHORT_SHA} ${REDIS_HOST} ${RUN_ID}' < kubernetes/schrodinger-job.yaml | kubectl apply -f -
+      envsubst '${AWS_ACCOUNT_ID} ${AWS_DEFAULT_REGION} ${ECR_REPOSITORY} ${CI_COMMIT_SHORT_SHA} ${REDIS_HOST} ${RUN_ID}' < infra/kubernetes/jobs/schrodinger-job.yaml | kubectl apply -f -
 
     - echo "Deployment (Kubernetes) Successfully Completed."
 
