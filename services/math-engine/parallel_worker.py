@@ -92,7 +92,7 @@ def get_initial_state(r, job_idx, grid_size, logger):
     else:
         raw = poll_redis_raw(r, init_key, job_idx=job_idx, logger=logger)
         matrix = np.frombuffer(raw, dtype=np.float64).copy().reshape((grid_size, grid_size))
-        logger.info(f"[READ] Retrieved initial grid from Redis.")
+        logger.info(f"[READ ] Retrieved initial grid from Redis.")
     
     return matrix
 
@@ -126,7 +126,7 @@ def pull_neighbor_edges(r, job_idx, total_jobs, step, logger):
         top_neighbor = deserialize_row(raw)
 
         t_shape = top_neighbor.shape if top_neighbor is not None else None
-        logger.info(f"[READ][step {step:<{step_width}d}] Received TOP neighbor from worker {job_idx-1} (key: {key}, shape={t_shape}).")
+        logger.info(f"[READ ][step {step:<{step_width}d}] Received TOP neighbor from worker {job_idx-1} (key: {key}, shape={t_shape}).")
 
     if job_idx < total_jobs - 1:
         key = f"{RUN_ID}:worker:{job_idx+1}:top:{step}"
@@ -134,7 +134,7 @@ def pull_neighbor_edges(r, job_idx, total_jobs, step, logger):
         bot_neighbor = deserialize_row(raw)
         
         b_shape = bot_neighbor.shape if bot_neighbor is not None else None
-        logger.info(f"[READ][step {step:<{step_width}d}] Received BOTTOM neighbor from worker {job_idx+1} (key: {key}, shape={b_shape}).")
+        logger.info(f"[READ ][step {step:<{step_width}d}] Received BOTTOM neighbor from worker {job_idx+1} (key: {key}, shape={b_shape}).")
     
     return top_neighbor, bot_neighbor
 
@@ -190,8 +190,8 @@ def main():
     # Setup logging
     logger = setup_logger(job_idx)
 
-    logger.info("Kubernetes containers are ephemeral; /tmp logs will be lost unless copied.")
-    logger.info("Use kubectl cp or your collect_worker_logs script (Linger duration: {LINGER_SECONDS} seconds).")
+    logger.info("[INFO ] Kubernetes containers are ephemeral; /tmp logs will be lost unless copied.")
+    logger.info(f"[INFO ] Use kubectl cp or your collect_worker_logs script (Linger duration: {LINGER_SECONDS} seconds).")
 
     logger.info(f"[START] Planning {total_steps} steps for rows {start_row}-{end_row-1}.")
 
@@ -246,11 +246,11 @@ def main():
             message = {"worker": job_idx, "step": step, "start_row": start_row, "data": np.abs(chunk).tolist()}
 
             r.publish(redis_channel, json.dumps(message))
-            logger.info(f"[PUB][step {step:<{step_width}d}] published chunk to channel [{redis_channel}]")
+            logger.info(f"[PUB  ][step {step:<{step_width}d}] published chunk to channel [{redis_channel}]")
         
         logger.debug(f"[STEP] {step} completed (Write> Sync> Read> Compute> Pub) in {time.time() - step_start:.4f}s.")
 
-    logger.info(f"[FIN] {total_steps} steps completed for rows {start_row}-{end_row-1}.")
+    logger.info(f"[FIN  ] {total_steps} steps completed for rows {start_row}-{end_row-1}.")
 
     time.sleep(LINGER_SECONDS) 
 
