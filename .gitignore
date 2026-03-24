@@ -1,5 +1,5 @@
 math-engine/original_schrodinger.f90
-*aws-creds.sh
 kubernetes/steps.md
 *.pem
 dev-tools/logs
+dev-tools/hide
