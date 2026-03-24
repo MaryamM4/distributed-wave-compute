@@ -22,9 +22,9 @@ PUBLISH_INTERVAL = 500
 TTL = 10800 # Long enough that it won't expire mid-work
 MAX_HANG_TIME = 3600
 
-RUN_ID = os.getenv("RUN_ID", "-1")
-redis_host = os.getenv("REDIS_HOST", "localhost")
-redis_port = int(os.getenv("REDIS_PORT", "6379"))
+RUN_ID = os.getenv("RUN_ID") or "-1"
+redis_host = os.getenv("REDIS_HOST") or "localhost"
+redis_port = int(os.getenv("REDIS_PORT", "6379")) 
 redis_channel = f"{RUN_ID}:{os.environ.get('REDIS_CHANNEL', 'wave_channel')}"
 
 def setup_logger(job_idx):

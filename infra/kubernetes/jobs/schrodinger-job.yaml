@@ -4,12 +4,22 @@ metadata:
   name: schrodinger-job
   namespace: schrodinger 
 
+  # Am considering changing name to schrodinger-job-${RUN_ID}
+  # And removing `kubectl delete job..`, but no neccessary atm. 
+  # (Linger duration helps work around deletion)
+
 spec:
   completions: 10             # total workers
   parallelism: 10             # run 10 at a time
   completionMode: Indexed     # REQUIRED for JOB_COMPLETION_INDEX
 
   template:
+    metadata:
+      labels:
+        # Allows "kubectl get pods -l run_id=<id>" 
+        #     or "kubectl logs -l run_id=<id>"
+        run_id: "${RUN_ID}"  
+
     spec:
       restartPolicy: Never
 

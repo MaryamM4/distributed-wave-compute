@@ -103,7 +103,7 @@ deploy_k8s:
     - kubectl delete job schrodinger-job -n schrodinger --wait=true || true
 
     - echo "Setting env vars and creating Job..."
-    - RUN_ID=$(cat /proc/sys/kernel/random/uuid)
+    - export RUN_ID=$(cat /proc/sys/kernel/random/uuid)
     - echo "RUN_ID=$RUN_ID"
     - >
       envsubst '${AWS_ACCOUNT_ID} ${AWS_DEFAULT_REGION} ${ECR_REPOSITORY} ${CI_COMMIT_SHORT_SHA} ${REDIS_HOST} ${RUN_ID}' < infra/kubernetes/jobs/schrodinger-job.yaml | kubectl apply -f -
