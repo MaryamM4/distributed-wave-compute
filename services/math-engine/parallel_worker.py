@@ -16,6 +16,7 @@ H_BAR = 1.054e-34
 MASS = 9.11e-31
 DT = 0.0005
 NUM_STEPS = 1
+step_width = 2
 
 PUBLISH_INTERVAL = 500
 TTL = 10800 # Long enough that it won't expire mid-work
