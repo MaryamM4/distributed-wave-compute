@@ -1,0 +1,53 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: schrodinger-job
+  namespace: schrodinger 
+
+spec:
+  completions: 10             # total workers
+  parallelism: 10             # run 10 at a time
+  completionMode: Indexed     # REQUIRED for JOB_COMPLETION_INDEX
+
+  template:
+    spec:
+      restartPolicy: Never
+
+      # No longer needed, switched from EBS to EFS, whihc works across AZs.
+      #nodeSelector: # EBS volumes can't attatch across AZ, so forcing pods
+      #  topology.kubernetes.io/zone: us-west-2a      # to run in same zone.
+
+      containers:
+      - name: worker  # image: ECR image URI. 
+        image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com/${ECR_REPOSITORY}:${CI_COMMIT_SHORT_SHA}
+        imagePullPolicy: Always
+
+        env:
+        - name: JOB_COMPLETION_INDEX
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.annotations['batch.kubernetes.io/job-completion-index']
+
+        - name: TOTAL_JOBS
+          value: "10"  # Must match "completions" value
+        - name: GRID_SIZE
+          value: "200"
+        - name: TOTAL_STEPS
+          value: "10000"
+
+        - name: REDIS_HOST  # value: Redis EC2 public IP
+          value: "${REDIS_HOST}"
+        - name: REDIS_PORT
+          value: "6379"
+
+        - name: RUN_ID
+          value: "${RUN_ID}"
+
+        volumeMounts:
+        - name: results-storage
+          mountPath: /data
+
+      volumes:
+      - name: results-storage
+        persistentVolumeClaim:
+          claimName: schrodinger-pvc
