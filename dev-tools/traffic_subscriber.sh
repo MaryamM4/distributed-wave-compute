@@ -30,6 +30,9 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 NC='\033[0m' # no color
 
+SPINNER_FRAMES=('|''/' '—' '\')
+SPINNER_INDEX=0
+
 # --===============================--
 
 # Parse flags
@@ -69,20 +72,23 @@ write() {
     fi
 }
 
-# Helper for inline overwrite (console only, no file logging)
-write_inline() {
+# Helper for inline overwrite with spinner animation (console only, no file logging)
+write_spinner() {
     ts="$(date '+%Y-%m-%d %H:%M:%S.%3N')"
 
     msg="$1"
-    colored_msg="$msg"
 
+    frame="${SPINNER_FRAMES[$SPINNER_INDEX]}"
+    SPINNER_INDEX=$(( (SPINNER_INDEX + 1) % 4 ))
+
+    colored_msg="$msg"
     if [[ "$msg" == *"[INFO"* ]]; then
         colored_msg="${GREEN}${msg}${NC}"
     elif [[ "$msg" == *"[ERROR"* ]]; then
         colored_msg="${RED}${msg}${NC}"
     fi
 
-    echo -ne "\r[$ts] $colored_msg"
+    echo -ne "\r[$ts] $frame $colored_msg"
 }
 
 # Helper handles cleanup
@@ -142,19 +148,21 @@ while true; do
     fi
 
     write "[ERROR] Redis stream disconnected. Retrying in 2s..."
-    sleep 2
+    sleep 0.2
 
     # Check tunnel health, restart if needed
     if ! ssh -S "$SOCKET" -O check "$EC2_USER@$EC2_IP" 2>/dev/null; then
         while true; do
             ((retry_count++))
 
-            write_inline "[ERROR] SSH tunnel is down. Reconnecting... (attempt $retry_count)"
+            write_spinner "[ERROR] SSH tunnel is down. Reconnecting... (attempt $retry_count)"
 
-            ssh -f -N -o IdentitiesOnly=yes -o ControlMaster=yes -o ControlPath="$SOCKET" -o ControlPersist=yes \
-                -i "$SSH_KEY" -L "$LOCAL_PORT:localhost:$REMOTE_PORT" "$EC2_USER@$EC2_IP"
+            if (( retry_count % 10 == 1 )); then # Only attempt reconnect every ~2s 
+                ssh -f -N -o IdentitiesOnly=yes -o ControlMaster=yes -o ControlPath="$SOCKET" -o ControlPersist=yes \
+                    -i "$SSH_KEY" -L "$LOCAL_PORT:localhost:$REMOTE_PORT" "$EC2_USER@$EC2_IP"
+            fi
 
-            sleep 1
+            sleep 0.2
 
             if ssh -S "$SOCKET" -O check "$EC2_USER@$EC2_IP" 2>/dev/null; then
                 echo
@@ -162,8 +170,6 @@ while true; do
                 retry_count=0
                 break
             fi
-
-            sleep 2
         done
     fi
 done
