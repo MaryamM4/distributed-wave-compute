@@ -17,7 +17,7 @@ OUTPUT_FILE="$OUTPUT_DIR/$FILE_NAME"
 SSH_KEY="$HOME/.ssh/aws/schrodinger-key-pair.pem"
 
 EC2_USER="ec2-user"
-EC2_IP="18.236.60.202" 
+EC2_IP="18.236.60.202"  
 
 LOCAL_PORT="6380"
 REMOTE_PORT="6379" # Redis port
@@ -69,6 +69,22 @@ write() {
     fi
 }
 
+# Helper for inline overwrite (console only, no file logging)
+write_inline() {
+    ts="$(date '+%Y-%m-%d %H:%M:%S.%3N')"
+
+    msg="$1"
+    colored_msg="$msg"
+
+    if [[ "$msg" == *"[INFO"* ]]; then
+        colored_msg="${GREEN}${msg}${NC}"
+    elif [[ "$msg" == *"[ERROR"* ]]; then
+        colored_msg="${RED}${msg}${NC}"
+    fi
+
+    echo -ne "\r[$ts] $colored_msg"
+}
+
 # Helper handles cleanup
 cleanup() {
     echo
@@ -112,39 +128,43 @@ fi
 write "[INFO ] Connected. Listening for Redis PUB/SUB messages..."
 write ""
 
-# Auto-reconnect: 
+# Auto-reconnect
+retry_count=0
+
 while true; do
     write "[INFO ] Starting Redis subscription..."
+    retry_count=0    
 
     if $SAVE_MODE; then
-        redis-cli -p "$LOCAL_PORT" PSUBSCRIBE '*' \
-            | ts '[%Y-%m-%d %H:%M:%S.%3N]' \
-            | tee -a "$OUTPUT_FILE"
+        redis-cli -p "$LOCAL_PORT" PSUBSCRIBE '*' | ts '[%Y-%m-%d %H:%M:%S.%3N]' | tee -a "$OUTPUT_FILE"
     else
-        redis-cli -p "$LOCAL_PORT" PSUBSCRIBE '*' \
-            | ts '[%Y-%m-%d %H:%M:%S.%3N]'
+        redis-cli -p "$LOCAL_PORT" PSUBSCRIBE '*' | ts '[%Y-%m-%d %H:%M:%S.%3N]'
     fi
 
     write "[ERROR] Redis stream disconnected. Retrying in 2s..."
     sleep 2
 
-    retry_count=0              # Check tunnel health, restart if needed
+    # Check tunnel health, restart if needed
     if ! ssh -S "$SOCKET" -O check "$EC2_USER@$EC2_IP" 2>/dev/null; then
-        ((retry_count++))
+        while true; do
+            ((retry_count++))
 
-        write "[ERROR] SSH tunnel is down. Reconnecting... (attempt $retry_count)"
+            write_inline "[ERROR] SSH tunnel is down. Reconnecting... (attempt $retry_count)"
 
-        ssh -f -N -o IdentitiesOnly=yes -o ControlMaster=yes -o ControlPath="$SOCKET" -o ControlPersist=yes \
-            -i "$SSH_KEY" -L "$LOCAL_PORT:localhost:$REMOTE_PORT" "$EC2_USER@$EC2_IP"
+            ssh -f -N -o IdentitiesOnly=yes -o ControlMaster=yes -o ControlPath="$SOCKET" -o ControlPersist=yes \
+                -i "$SSH_KEY" -L "$LOCAL_PORT:localhost:$REMOTE_PORT" "$EC2_USER@$EC2_IP"
 
-        sleep 1
+            sleep 1
 
-        if ssh -S "$SOCKET" -O check "$EC2_USER@$EC2_IP" 2>/dev/null; then
-            write "[INFO ] Tunnel re-established after $retry_count attempt(s)."
-            retry_count=0
-        else
-            write "[ERROR] Failed to re-establish tunnel. Retrying... ($retry_count)"
-        fi
+            if ssh -S "$SOCKET" -O check "$EC2_USER@$EC2_IP" 2>/dev/null; then
+                echo
+                write "[INFO ] Tunnel re-established after $retry_count attempt(s)."
+                retry_count=0
+                break
+            fi
+
+            sleep 2
+        done
     fi
 done
 
