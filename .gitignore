@@ -3,3 +3,4 @@ kubernetes/steps.md
 *.pem
 dev-tools/logs
 dev-tools/hide
+services/visualizer/venv

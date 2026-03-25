@@ -1,3 +1,6 @@
+import matplotlib
+matplotlib.use("TkAgg")
+
 import argparse
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
@@ -13,6 +16,8 @@ from tools.recorder import load_run
 
 LIVE_INTERVAL=100  # 50 or 100 for less CPU load
 
+ani = None # Prevent garbage collection
+
 '''
 Live Mode (also Exports (to video) & Records to enable replay):
 python visualizer/app.py live --redis-host <EC2_IP> --channel <RUN_ID>:wave_channel --record --run-id test_run
@@ -25,6 +30,7 @@ python visualizer/app.py replay --run-id test_run --skip 2 --fps 30  --export-vi
 '''
 
 def run_live(args):
+    global ani
     q = queue.Queue()
 
     # Redis subscriber thread
@@ -74,19 +80,23 @@ def run_live(args):
         if current_frame is None:
             ax.set_title("Waiting for data...")
             return 
+        
+        # No data to start off from 
+        if current_frame is None:
+            ax.set_title("Waiting for data...")
+            return
 
         plot.update(current_frame) 
         
         # Title
         if last_step is None:                   # Handle no data case
-            ax.set_title(f"Waiting for data...")
+            ax.set_title(f"Last step empty...")
         elif time.time() - last_frame_time > 5: # Handle stalled stream
-            ax.set_title(f"PAUSED (last step: {step})...")
-
+            ax.set_title(f"PAUSED (last step: {last_step})...")
         else:
             ax.set_title(f"Live: Step {last_step}")
 
-    ani = FuncAnimation(fig, update, interval=LIVE_INTERVAL)
+    ani = FuncAnimation(fig, update, interval=LIVE_INTERVAL, cache_frame_data=False)
 
     try:
         plt.show() # Update plot
@@ -98,6 +108,7 @@ def run_live(args):
     return ani
 
 def run_replay(args):
+    global ani
     metadata, steps, frames = load_run(args.run_id)
 
     print(f"[REPLAY] Run: {args.run_id}")
