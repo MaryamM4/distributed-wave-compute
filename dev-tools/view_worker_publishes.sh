@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# Run with "save" flag to log into file.
-# ./dev-tools/view_worker_publishes.sh --save
-
 N_WORKERS=10
 NAMESPACE="schrodinger"
 
