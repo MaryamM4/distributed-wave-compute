@@ -1,6 +1,6 @@
 #!/bin/bash
 
-local_dir="./logs"
+local_dir="./logs/worker-stdout"
 REMOTE_DIR="/tmp" 
 
 N_WORKERS=10 

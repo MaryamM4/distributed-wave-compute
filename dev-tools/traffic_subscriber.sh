@@ -5,9 +5,9 @@
 
 # Save config
 SAVE_MODE=true
-LOG_DIR="logs"
+LOG_DIR="logs/redis-stream"
 RUN_ID=$(date +"%Y%m%d_%H%M%S")
-FILE_NAME="redis_stream_${RUN_ID}.log"
+FILE_NAME="rs_${RUN_ID}.log"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 OUTPUT_DIR="$SCRIPT_DIR/$LOG_DIR"
@@ -88,7 +88,7 @@ write_spinner() {
         colored_msg="${RED}${msg}${NC}"
     fi
 
-    echo -ne "\r[$ts] $frame $colored_msg"
+    echo -ne "\r[$ts] $colored_msg $frame" # Spinner at the end of the line
 }
 
 # Helper handles cleanup
